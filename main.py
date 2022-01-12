@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 app = FastAPI()
 
-es = AsyncElasticsearch(hosts="http://ec2-35-158-96-222.eu-central-1.compute.amazonaws.com:9200")
+es = AsyncElasticsearch(hosts="http://localhost:9200")
 
 
 class Tweet(BaseModel):
@@ -58,6 +58,7 @@ class SearchRequest(BaseModel):
     publication: Optional[str]
     date_filter: Optional[dict]
     author: Optional[str]
+    page: int = 1
 
 
 def generate_fts_clause(request: SearchRequest) -> dict:
@@ -98,7 +99,7 @@ def generate_fts_clause(request: SearchRequest) -> dict:
     }
 
 
-def generate_filters(request:SearchRequest) -> List[dict]:
+def generate_filters(request: SearchRequest) -> List[dict]:
     filters = []
     if request.author:
         filters.append({
@@ -115,8 +116,35 @@ def generate_filters(request:SearchRequest) -> List[dict]:
     return filters
 
 
+def calc_paging(page: int):
+    return (page - 1) * 10
+
+
 @app.post("/search")
 async def search(request: SearchRequest):
+    highlight, query = await build_query(request)
+    aggs = {
+        "authors": {
+            "terms": {
+                "field": "authors.keyword",
+                "size": 50
+            }
+        }
+    }
+    suggest = {
+        "did_you_mean": {
+            "text": request.query,
+            "phrase": {
+                "field": "title"
+            }
+        }
+    }
+
+    return await es.search(index="books", query=query, _source=["title"], highlight=highlight,
+                           from_=calc_paging(request.page), aggregations=aggs, suggest=suggest)
+
+
+async def build_query(request):
     fts_clause = generate_fts_clause(request)
     filter_clauses = generate_filters(request)
     query = {
@@ -125,7 +153,27 @@ async def search(request: SearchRequest):
             "filter": filter_clauses
         }
     }
-    return await es.search(index="articles", query=query, _source=["title"])
+    highlight = {
+        "fields": {
+            "title": {}
+        }
+    }
+    return highlight, query
+
+
+@app.post("/author_search")
+async def author_search(request: SearchRequest):
+    highlight, query = await build_query(request)
+    collapse = {
+        "field": "authors.keyword",
+        "inner_hits": {
+            "name": "books_By_author",
+            "_source": ["title"],
+            "size": 3
+        }
+    }
+    return await es.search(index="books", query=query, _source=False, highlight=highlight,
+                           from_=calc_paging(request.page), collapse=collapse)
 
 
 
@@ -135,4 +183,3 @@ if __name__ == "__main__":
         "main:app",
         reload=True,
     )
-
