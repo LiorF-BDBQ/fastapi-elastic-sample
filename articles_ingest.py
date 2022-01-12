@@ -4,7 +4,7 @@ import sys
 
 from elasticsearch import Elasticsearch, helpers
 
-es = Elasticsearch(hosts="http://127.0.0.1:9200")
+es = Elasticsearch(hosts="http://35.158.96.222:9200")
 file_path = "articles.csv.gz"
 index_name = "articles"
 csv.field_size_limit(sys.maxsize)
@@ -27,7 +27,5 @@ def document_stream(file_to_index):
 
 
 stream = document_stream(file_path)
-for ok, response in helpers.streaming_bulk(es, actions=stream):
-    if not ok:
-        # Failure inserting
-        print(response)
+for ok, response in helpers.streaming_bulk(es, actions=stream, max_chunk_bytes=1024):
+    print(ok)
